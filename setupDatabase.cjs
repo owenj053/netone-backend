@@ -1,15 +1,18 @@
-const pool = ('./db.cjs');
-const logger = ('./utils/logger.cjs');
+const pool = require('./db.cjs'); // This import is correct
+const logger = require('./utils/logger.cjs');
 
 const setupDatabase = async () => {
-  const client = await pool.connect();
+  // We don't need a separate client for this script.
+  // We can use the pool directly.
   try {
     logger.info('Starting database setup...');
 
-    await client.query('DROP TABLE IF EXISTS permits, activity_logs, tickets, assets, users, audit_logs CASCADE');
+    // Drop existing tables to start fresh
+    await pool.query('DROP TABLE IF EXISTS permits, activity_logs, tickets, assets, users, audit_logs CASCADE');
     logger.info('Dropped existing tables.');
 
-    await client.query(`
+    // Create users table
+    await pool.query(`
       CREATE TABLE users (
         user_id SERIAL PRIMARY KEY,
         engineer_id VARCHAR(50) UNIQUE NOT NULL,
@@ -21,7 +24,8 @@ const setupDatabase = async () => {
     `);
     logger.info('Table "users" created.');
 
-    await client.query(`
+    // Create assets table
+    await pool.query(`
       CREATE TABLE assets (
         asset_id SERIAL PRIMARY KEY,
         asset_name VARCHAR(150) NOT NULL,
@@ -32,8 +36,9 @@ const setupDatabase = async () => {
       );
     `);
     logger.info('Table "assets" created.');
-
-    await client.query(`
+    
+    // Create tickets table
+    await pool.query(`
       CREATE TABLE tickets (
         ticket_id SERIAL PRIMARY KEY,
         asset_id INTEGER REFERENCES assets(asset_id) NOT NULL,
@@ -49,7 +54,8 @@ const setupDatabase = async () => {
     `);
     logger.info('Table "tickets" created.');
 
-    await client.query(`
+    // Create activity_logs table
+    await pool.query(`
       CREATE TABLE activity_logs (
         log_id SERIAL PRIMARY KEY,
         ticket_id INTEGER REFERENCES tickets(ticket_id) NOT NULL,
@@ -61,7 +67,8 @@ const setupDatabase = async () => {
     `);
     logger.info('Table "activity_logs" created.');
 
-    await client.query(`
+    // Create permits table
+    await pool.query(`
       CREATE TABLE permits (
         permit_id SERIAL PRIMARY KEY,
         ticket_id INTEGER REFERENCES tickets(ticket_id) UNIQUE NOT NULL,
@@ -76,25 +83,26 @@ const setupDatabase = async () => {
     `);
     logger.info('Table "permits" created.');
 
-      await client.query(`
-        CREATE TABLE audit_logs (
-          log_id SERIAL PRIMARY KEY,
-          user_id INTEGER REFERENCES users(user_id),
-          action VARCHAR(100) NOT NULL,
-          entity_type VARCHAR(50),
-          entity_id INTEGER,
-          metadata JSONB,
-          created_at TIMESTAMP DEFAULT NOW()
-        );
-      `);
-      console.log('Table "audit_logs" created.');
+    // Create audit_logs table
+    await pool.query(`
+      CREATE TABLE audit_logs (
+        log_id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(user_id),
+        action VARCHAR(100) NOT NULL,
+        entity_type VARCHAR(50),
+        entity_id INTEGER,
+        metadata JSONB,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    logger.info('Table "audit_logs" created.');
 
     logger.info('Database setup completed successfully!');
   } catch (err) {
     logger.error(`Error during database setup: ${err.message}`);
   } finally {
-    client.release();
-    pool.end();
+    // End the pool since this is a one-off script
+    pool.end(); 
   }
 };
 
