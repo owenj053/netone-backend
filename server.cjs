@@ -17,11 +17,13 @@ const userRoutes = require('./routes/users.cjs');
 const ticketRoutes = require('./routes/tickets.cjs');
 const assetRoutes = require('./routes/assets.cjs');
 const permitRoutes = require('./routes/permits.cjs');
+const reportRoutes = require('./routes/reports.cjs');
 
 app.use('/api/users', userRoutes);
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/assets', assetRoutes);
 app.use('/api/permits', permitRoutes);
+app.use('/api/reports', reportRoutes);
 
 // Home route
 app.get('/', (req, res) => {

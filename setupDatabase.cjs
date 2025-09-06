@@ -1,17 +1,14 @@
-const pool = require('./db.cjs'); // This import is correct
+const pool = require('./db.cjs');
 const logger = require('./utils/logger.cjs');
 
 const setupDatabase = async () => {
-  // We don't need a separate client for this script.
-  // We can use the pool directly.
   try {
     logger.info('Starting database setup...');
 
-    // Drop existing tables to start fresh
     await pool.query('DROP TABLE IF EXISTS permits, activity_logs, tickets, assets, users, audit_logs CASCADE');
     logger.info('Dropped existing tables.');
 
-    // Create users table
+    // Create users table (no changes)
     await pool.query(`
       CREATE TABLE users (
         user_id SERIAL PRIMARY KEY,
@@ -24,7 +21,7 @@ const setupDatabase = async () => {
     `);
     logger.info('Table "users" created.');
 
-    // Create assets table
+    // CORRECTED: Added latitude and longitude to store an asset's official location
     await pool.query(`
       CREATE TABLE assets (
         asset_id SERIAL PRIMARY KEY,
@@ -32,10 +29,32 @@ const setupDatabase = async () => {
         asset_type VARCHAR(50) NOT NULL,
         qr_code_id VARCHAR(100) UNIQUE,
         parent_asset_id INTEGER REFERENCES assets(asset_id),
+        latitude DECIMAL(9, 6),
+        longitude DECIMAL(9, 6),
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
     logger.info('Table "assets" created.');
+    
+    // CORRECTED: Added columns to store the ticket's specific location and weather data
+    await pool.query(`
+      CREATE TABLE tickets (
+        ticket_id SERIAL PRIMARY KEY,
+        asset_id INTEGER REFERENCES assets(asset_id) NOT NULL,
+        assigned_to_id INTEGER REFERENCES users(user_id),
+        created_by_id INTEGER REFERENCES users(user_id) NOT NULL,
+        status VARCHAR(30) NOT NULL,
+        urgency VARCHAR(20) NOT NULL,
+        description TEXT NOT NULL,
+        root_cause VARCHAR(100),
+        latitude DECIMAL(9, 6),
+        longitude DECIMAL(9, 6),
+        weather_data JSONB,
+        created_at TIMESTAMP DEFAULT NOW(),
+        resolved_at TIMESTAMP
+      );
+    `);
+    logger.info('Table "tickets" created.');
     
     // Create tickets table
     await pool.query(`

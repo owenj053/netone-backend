@@ -1,24 +1,14 @@
 const pool = require('../db.cjs');
 const logger = require('../utils/logger.cjs');
 const { logAudit } = require('../utils/auditLogger.cjs');
+const axios = require('axios');
 
 const getTickets = async (req, res) => {
   const requestId = req.requestId;
   const userId = req.user.id;
-
   logger.info(`[${requestId}] Fetching tickets for user_id: ${userId}`);
-
   try {
-    const queryText = `
-      SELECT * 
-      FROM tickets 
-      WHERE assigned_to_id = $1 
-      ORDER BY created_at DESC
-    `;
-
-    const { rows } = await pool.query(queryText, [userId]);
-
-    logger.info(`[${requestId}] Retrieved ${rows.length} tickets`);
+    const { rows } = await pool.query("SELECT * FROM tickets WHERE assigned_to_id = $1 ORDER BY created_at DESC", [userId]);
     res.json(rows);
   } catch (err) {
     logger.error(`[${requestId}] Error fetching tickets: ${err.message}`);
@@ -40,32 +30,27 @@ const getAllTicketsForManager = async (req, res) => {
 
 
 const createTicket = async (req, res) => {
-  const { asset_id, description, urgency, status } = req.body;
+  // 1. Accept optional latitude and longitude from the frontend.
+  const { asset_id, description, urgency, status, latitude, longitude } = req.body;
   const created_by_id = req.user.id;
   const requestId = req.requestId;
 
-  logger.info(`[${requestId}] Creating ticket for asset_id: ${asset_id} by user_id: ${created_by_id}`);
+  logger.info(`[${requestId}] Creating ticket for asset_id: ${asset_id}`);
+  
+  let ticket;
 
   try {
+    // 2. Save the ticket to the database, including the (potentially null) GPS coordinates.
     const queryText = `
-      INSERT INTO tickets 
-        (asset_id, created_by_id, assigned_to_id, description, urgency, status) 
-      VALUES ($1, $2, $3, $4, $5, $6) 
+      INSERT INTO tickets (asset_id, created_by_id, assigned_to_id, description, urgency, status, latitude, longitude) 
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
       RETURNING *
     `;
-
-    const { rows } = await pool.query(queryText, [
-      asset_id,
-      created_by_id,
-      created_by_id,
-      description,
-      urgency,
-      status,
-    ]);
-
-    const ticket = rows[0];
+    const { rows } = await pool.query(queryText, [asset_id, created_by_id, created_by_id, description, urgency, status, latitude, longitude]);
+    ticket = rows[0];
 
     logger.info(`[${requestId}] Ticket created: ${ticket.ticket_id}`);
+    res.status(201).json(ticket); // Send a success response to the user immediately.
 
     await logAudit({
       userId: created_by_id,
@@ -75,10 +60,45 @@ const createTicket = async (req, res) => {
       metadata: { asset_id, urgency, status },
     });
 
-    res.status(201).json(ticket);
   } catch (err) {
     logger.error(`[${requestId}] Error creating ticket: ${err.message}`);
-    res.status(500).json({ message: 'Internal server error' });
+    if (!res.headersSent) {
+      res.status(500).json({ message: 'Internal server error' });
+    }
+    return; // Stop execution if ticket creation failed.
+  }
+
+  // --- BACKGROUND WEATHER FETCH ---
+  // This runs after the user has already received their success response.
+  try {
+    let finalLatitude, finalLongitude;
+    
+    // 3. The Intelligent Fallback Logic
+    if (ticket.latitude && ticket.longitude) {
+      // Ideal case: Use the live GPS coordinates that were sent with the ticket.
+      finalLatitude = ticket.latitude;
+      finalLongitude = ticket.longitude;
+      logger.info(`[${requestId}] Using live GPS coordinates for weather fetch.`);
+    } else {
+      // Fallback case: Get the asset's static "commissioned" location from the database.
+      const assetRes = await pool.query('SELECT latitude, longitude FROM assets WHERE asset_id = $1', [asset_id]);
+      finalLatitude = assetRes.rows[0]?.latitude;
+      finalLongitude = assetRes.rows[0]?.longitude;
+      logger.info(`[${requestId}] No live GPS. Falling back to asset's static coordinates.`);
+    }
+
+    // 4. Fetch and save the weather data if we have coordinates and an API key.
+    if (finalLatitude && finalLongitude && process.env.OPENWEATHER_API_KEY) {
+      const weatherApiUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${finalLatitude}&lon=${finalLongitude}&appid=${process.env.OPENWEATHER_API_KEY}&units=metric`;
+      const weatherResponse = await axios.get(weatherApiUrl);
+      const weatherData = weatherResponse.data;
+
+      await pool.query('UPDATE tickets SET weather_data = $1 WHERE ticket_id = $2', [weatherData, ticket.ticket_id]);
+      logger.info(`[${requestId}] Successfully added weather data to ticket ${ticket.ticket_id}`);
+    }
+  } catch (weatherErr) {
+    // We only log this error; we don't send another response because the user already has one.
+    logger.error(`[${requestId}] Failed to fetch or save weather data for ticket ${ticket.ticket_id}: ${weatherErr.message}`);
   }
 };
 
