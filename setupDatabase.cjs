@@ -5,10 +5,11 @@ const setupDatabase = async () => {
   try {
     logger.info('Starting database setup...');
 
+    // Drop all tables in an order that respects dependencies, or use CASCADE
     await pool.query('DROP TABLE IF EXISTS permits, activity_logs, tickets, assets, users, audit_logs CASCADE');
     logger.info('Dropped existing tables.');
 
-    // Create users table (no changes)
+    // 1. Create 'users' table (no dependencies)
     await pool.query(`
       CREATE TABLE users (
         user_id SERIAL PRIMARY KEY,
@@ -21,7 +22,7 @@ const setupDatabase = async () => {
     `);
     logger.info('Table "users" created.');
 
-    // CORRECTED: Added latitude and longitude to store an asset's official location
+    // 2. Create 'assets' table (no external dependencies)
     await pool.query(`
       CREATE TABLE assets (
         asset_id SERIAL PRIMARY KEY,
@@ -35,8 +36,9 @@ const setupDatabase = async () => {
       );
     `);
     logger.info('Table "assets" created.');
-    
-    // CORRECTED: Added columns to store the ticket's specific location and weather data
+
+    // 3. Create 'tickets' table (depends on 'users' and 'assets')
+    // Using the version with latitude, longitude, and weather_data
     await pool.query(`
       CREATE TABLE tickets (
         ticket_id SERIAL PRIMARY KEY,
@@ -55,25 +57,8 @@ const setupDatabase = async () => {
       );
     `);
     logger.info('Table "tickets" created.');
-    
-    // Create tickets table
-    await pool.query(`
-      CREATE TABLE tickets (
-        ticket_id SERIAL PRIMARY KEY,
-        asset_id INTEGER REFERENCES assets(asset_id) NOT NULL,
-        assigned_to_id INTEGER REFERENCES users(user_id),
-        created_by_id INTEGER REFERENCES users(user_id) NOT NULL,
-        status VARCHAR(30) NOT NULL,
-        urgency VARCHAR(20) NOT NULL,
-        description TEXT NOT NULL,
-        root_cause VARCHAR(100),
-        created_at TIMESTAMP DEFAULT NOW(),
-        resolved_at TIMESTAMP
-      );
-    `);
-    logger.info('Table "tickets" created.');
 
-    // Create activity_logs table
+    // 4. Create 'activity_logs' table (depends on 'tickets' and 'users')
     await pool.query(`
       CREATE TABLE activity_logs (
         log_id SERIAL PRIMARY KEY,
@@ -86,7 +71,7 @@ const setupDatabase = async () => {
     `);
     logger.info('Table "activity_logs" created.');
 
-    // Create permits table
+    // 5. Create 'permits' table (depends on 'tickets' and 'users')
     await pool.query(`
       CREATE TABLE permits (
         permit_id SERIAL PRIMARY KEY,
@@ -102,7 +87,7 @@ const setupDatabase = async () => {
     `);
     logger.info('Table "permits" created.');
 
-    // Create audit_logs table
+    // 6. Create 'audit_logs' table (depends on 'users')
     await pool.query(`
       CREATE TABLE audit_logs (
         log_id SERIAL PRIMARY KEY,
@@ -121,7 +106,7 @@ const setupDatabase = async () => {
     logger.error(`Error during database setup: ${err.message}`);
   } finally {
     // End the pool since this is a one-off script
-    pool.end(); 
+    pool.end();
   }
 };
 
