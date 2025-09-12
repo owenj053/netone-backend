@@ -5,7 +5,6 @@ const { requireRole } = require('../middleware/requireRole.cjs');
 
 const router = express.Router();
 
-// All reporting routes are protected and for Managers only.
 router.get('/summary', verifyToken, requireRole(['Manager']), getTeamSummary);
 router.get('/user/:userId', verifyToken, requireRole(['Manager']), getUserReport);
 

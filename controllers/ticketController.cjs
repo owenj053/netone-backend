@@ -3,6 +3,67 @@ const logger = require('../utils/logger.cjs');
 const { logAudit } = require('../utils/auditLogger.cjs');
 const axios = require('axios');
 
+const unifiedUpdateTicket = async (req, res) => {
+  const { id: ticket_id } = req.params;
+  const updates = req.body;
+  const { id: userId, role } = req.user;
+  const requestId = req.requestId;
+
+  try {
+    // --- ACTION 1: ADD A LOG ---
+    if (updates.log_entry) {
+      logger.info(`[${requestId}] Unified Update: Adding log to ticket ${ticket_id}`);
+      const logQuery = `INSERT INTO activity_logs (ticket_id, user_id, log_entry) VALUES ($1, $2, $3) RETURNING *`;
+      await pool.query(logQuery, [ticket_id, userId, updates.log_entry]);
+      await logAudit({ userId, action: 'ADD_ACTIVITY_LOG', entityType: 'ticket', entityId: ticket_id });
+      return res.status(200).json({ message: 'Log added successfully' });
+    }
+
+    // --- ACTION 2: CLOSE THE TICKET ---
+    if (updates.status && updates.status.toLowerCase() === 'closed') {
+      logger.info(`[${requestId}] Unified Update: Closing ticket ${ticket_id}`);
+      if (!updates.resolution_summary) {
+        return res.status(400).json({ message: 'Resolution summary is required to close a ticket.' });
+      }
+
+      const ticketRes = await pool.query('SELECT status FROM tickets WHERE ticket_id = $1', [ticket_id]);
+      if (ticketRes.rows.length === 0) return res.status(404).json({ message: 'Ticket not found' });
+      if (ticketRes.rows[0].status.toLowerCase() !== 'resolved') {
+        return res.status(400).json({ message: 'A ticket must be in "Resolved" status before it can be closed.' });
+      }
+
+      const closeQuery = `UPDATE tickets SET status = 'Closed', closed_at = NOW(), closed_by_id = $1, resolution_summary = $2 WHERE ticket_id = $3 RETURNING *`;
+      const { rows } = await pool.query(closeQuery, [userId, updates.resolution_summary, ticket_id]);
+      await logAudit({ userId, action: 'CLOSE_TICKET', entityType: 'ticket', entityId: ticket_id });
+      return res.json(rows[0]);
+    }
+
+    // --- DEFAULT ACTION: GENERAL UPDATE ---
+    logger.info(`[${requestId}] Unified Update: General update for ticket ${ticket_id}`);
+    const currentTicketRes = await pool.query('SELECT * FROM tickets WHERE ticket_id = $1', [ticket_id]);
+    if (currentTicketRes.rows.length === 0) return res.status(404).json({ message: 'Ticket not found' });
+    const currentTicket = currentTicketRes.rows[0];
+    
+    if (role.toLowerCase() === 'engineer' && currentTicket.assigned_to_id !== userId) {
+      return res.status(403).json({ message: 'Access denied: You can only update tickets assigned to you.' });
+    }
+
+    const newTicketData = { ...currentTicket, ...updates };
+    if (updates.status && updates.status.toLowerCase() === 'resolved' && currentTicket.status.toLowerCase() !== 'resolved') {
+      newTicketData.resolved_at = new Date();
+    }
+    
+    const updateQuery = `UPDATE tickets SET assigned_to_id = $1, status = $2, resolved_at = $3 WHERE ticket_id = $4 RETURNING *`;
+    const { rows } = await pool.query(updateQuery, [newTicketData.assigned_to_id, newTicketData.status, newTicketData.resolved_at, ticket_id]);
+    await logAudit({ userId, action: 'UPDATE_TICKET', entityType: 'ticket', entityId: ticket_id, metadata: updates });
+    return res.json(rows[0]);
+
+  } catch (err) {
+    logger.error(`[${requestId}] Error in unified update for ticket ${ticket_id}: ${err.message}`);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
 const getTickets = async (req, res) => {
   const requestId = req.requestId;
   const userId = req.user.id;
@@ -257,4 +318,5 @@ module.exports = {
   getLogsForTicket,
   updateTicket,
   closeTicket,
+  unifiedUpdateTicket,
 };

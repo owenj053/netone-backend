@@ -1,30 +1,35 @@
 const express = require('express');
-const { requireRole } = require('../middleware/requireRole.cjs');
-const { verifyToken } = require('../middleware/auth.cjs');
-
-const {
-  getTickets,
-  createTicket,
-  getTicketById,
-  addActivityLog,
-  getAllTicketsForManager,
-  getLogsForTicket,
-  updateTicket
+const { 
+    // We are no longer exporting the old, separate functions
+    getTickets, 
+    getAllTicketsForManager, 
+    createTicket, 
+    getTicketById, 
+    getLogsForTicket, 
+    unifiedUpdateTicket // <-- The ONLY update/post function needed besides create
 } = require('../controllers/ticketController.cjs');
+const { verifyToken } = require('../middleware/auth.cjs');
 
 const router = express.Router();
 
-// Routes for Engineers and Managers
-router.get('/', verifyToken, getTickets);
+// --- REFACTORED: Specific log/close PUT/POST routes are now removed ---
+
+// General GET routes remain the same
+router.get('/', verifyToken, (req, res, next) => {
+    if (req.user.role?.toLowerCase() === 'manager') {
+        return getAllTicketsForManager(req, res, next);
+    }
+    return getTickets(req, res, next);
+});
 router.post('/', verifyToken, createTicket);
+
+// The GET route for logs is still needed to fetch the list
+router.get('/:id/logs', verifyToken, getLogsForTicket);
 router.get('/:id', verifyToken, getTicketById);
-router.post('/:id/logs', verifyToken, addActivityLog);
-router.put('/:id', verifyToken, updateTicket); // For updates like reassigning
 
-// Route for fetching logs
-router.get('/:id/logs', verifyToken, getLogsForTicket); 
-
-// Route specifically for Managers
-router.get('/manager/all', verifyToken, requireRole(['Manager']), getAllTicketsForManager);
+// --- REFACTORED: All PUT requests now go to a single, powerful controller ---
+// This one route now handles adding logs, closing tickets, and general updates.
+router.put('/:id', verifyToken, unifiedUpdateTicket);
 
 module.exports = router;
+
