@@ -1,113 +1,28 @@
-const pool = require('./db.cjs');
-const logger = require('./utils/logger.cjs');
+import React from 'react';
+import { Navigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
-const setupDatabase = async () => {
-  try {
-    logger.info('Starting database setup...');
+const ProtectedRoute = ({ allowedRoles, children }) => {
+  // Use our custom hook for a single source of truth
+  const { isAuthenticated, role } = useAuth();
 
-    // Drop all tables in an order that respects dependencies, or use CASCADE
-    await pool.query('DROP TABLE IF EXISTS permits, activity_logs, tickets, assets, users, audit_logs CASCADE');
-    logger.info('Dropped existing tables.');
-
-    // 1. Create 'users' table (no dependencies)
-    await pool.query(`
-      CREATE TABLE users (
-        user_id SERIAL PRIMARY KEY,
-        engineer_id VARCHAR(50) UNIQUE NOT NULL,
-        full_name VARCHAR(100) NOT NULL,
-        password_hash VARCHAR(255) NOT NULL,
-        role VARCHAR(20) NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-    logger.info('Table "users" created.');
-
-    // 2. Create 'assets' table (no external dependencies)
-    await pool.query(`
-      CREATE TABLE assets (
-        asset_id SERIAL PRIMARY KEY,
-        asset_name VARCHAR(150) NOT NULL,
-        asset_type VARCHAR(50) NOT NULL,
-        qr_code_id VARCHAR(100) UNIQUE,
-        parent_asset_id INTEGER REFERENCES assets(asset_id),
-        latitude DECIMAL(9, 6),
-        longitude DECIMAL(9, 6),
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-    logger.info('Table "assets" created.');
-
-    // 3. Create 'tickets' table (depends on 'users' and 'assets')
-    // Using the version with latitude, longitude, and weather_data
-    await pool.query(`
-      CREATE TABLE tickets (
-        ticket_id SERIAL PRIMARY KEY,
-        asset_id INTEGER REFERENCES assets(asset_id) NOT NULL,
-        assigned_to_id INTEGER REFERENCES users(user_id),
-        created_by_id INTEGER REFERENCES users(user_id) NOT NULL,
-        status VARCHAR(30) NOT NULL,
-        urgency VARCHAR(20) NOT NULL,
-        description TEXT NOT NULL,
-        root_cause VARCHAR(100),
-        latitude DECIMAL(9, 6),
-        longitude DECIMAL(9, 6),
-        weather_data JSONB,
-        created_at TIMESTAMP DEFAULT NOW(),
-        resolved_at TIMESTAMP
-      );
-    `);
-    logger.info('Table "tickets" created.');
-
-    // 4. Create 'activity_logs' table (depends on 'tickets' and 'users')
-    await pool.query(`
-      CREATE TABLE activity_logs (
-        log_id SERIAL PRIMARY KEY,
-        ticket_id INTEGER REFERENCES tickets(ticket_id) NOT NULL,
-        user_id INTEGER REFERENCES users(user_id) NOT NULL,
-        log_entry TEXT NOT NULL,
-        parts_used TEXT,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-    logger.info('Table "activity_logs" created.');
-
-    // 5. Create 'permits' table (depends on 'tickets' and 'users')
-    await pool.query(`
-      CREATE TABLE permits (
-        permit_id SERIAL PRIMARY KEY,
-        ticket_id INTEGER REFERENCES tickets(ticket_id) UNIQUE NOT NULL,
-        permit_type VARCHAR(50) NOT NULL,
-        issued_by_id INTEGER REFERENCES users(user_id) NOT NULL,
-        acknowledged_by_id INTEGER REFERENCES users(user_id),
-        status VARCHAR(20) NOT NULL,
-        safety_checklist JSONB,
-        issued_at TIMESTAMP DEFAULT NOW(),
-        acknowledged_at TIMESTAMP
-      );
-    `);
-    logger.info('Table "permits" created.');
-
-    // 6. Create 'audit_logs' table (depends on 'users')
-    await pool.query(`
-      CREATE TABLE audit_logs (
-        log_id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(user_id),
-        action VARCHAR(100) NOT NULL,
-        entity_type VARCHAR(50),
-        entity_id INTEGER,
-        metadata JSONB,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-    logger.info('Table "audit_logs" created.');
-
-    logger.info('Database setup completed successfully!');
-  } catch (err) {
-    logger.error(`Error during database setup: ${err.message}`);
-  } finally {
-    // End the pool since this is a one-off script
-    pool.end();
+  // 1. Check if the user is authenticated at all
+  if (!isAuthenticated) {
+    // Redirect to login if there's no token
+    return <Navigate to="/login" replace />;
   }
+
+  // 2. Check if the user has the required role
+  // This check only runs if the user is authenticated
+  const hasRequiredRole = role && allowedRoles.map(r => r.toLowerCase()).includes(role.toLowerCase());
+
+  if (!hasRequiredRole) {
+    // Redirect to an unauthorized page if their role is wrong
+    return <Navigate to="/unauthorized" replace />;
+  }
+
+  // If both checks pass, render the child component
+  return children;
 };
 
-setupDatabase();
+export default ProtectedRoute;

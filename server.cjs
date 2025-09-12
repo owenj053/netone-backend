@@ -25,14 +25,14 @@ const ticketRoutes = require('./routes/tickets.cjs');
 const assetRoutes = require('./routes/assets.cjs');
 const permitRoutes = require('./routes/permits.cjs');
 const reportRoutes = require('./routes/reports.cjs');
-
+const dispatchRoutes = require('./routes/dispatch.cjs');
 
 app.use('/api/users', userRoutes);
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/assets', assetRoutes);
 app.use('/api/permits', permitRoutes);
 app.use('/api/reports', reportRoutes);
-
+app.use('/api/dispatch', dispatchRoutes);
 
 // Home route
 app.get('/', (req, res) => {
@@ -49,4 +49,3 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   logger.info(`Server is listening on port ${PORT}`);
 });
-

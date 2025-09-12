@@ -1,7 +1,7 @@
 const express = require('express');
 const { requireRole } = require('../middleware/requireRole.cjs');
 const { verifyToken } = require('../middleware/auth.cjs');
-// CORRECTED: Import ALL the functions you need from the controller
+
 const {
   getTickets,
   createTicket,

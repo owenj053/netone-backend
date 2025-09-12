@@ -1,18 +1,14 @@
 const express = require('express');
+const { registerUser, loginUser, getUsersByRole, updateUser } = require('../controllers/userController.cjs');
 const { verifyToken } = require('../middleware/auth.cjs');
-const {
-  registerUser,
-  loginUser,
-  getUsersByRole
-} = require('../controllers/userController.cjs');
+const { requireRole } = require('../middleware/requireRole.cjs');
 
 const router = express.Router();
 
-// Public routes
-router.post('/register', registerUser);
 router.post('/login', loginUser);
 
-// Protected route to get users by role
-router.get('/', verifyToken, getUsersByRole);
+router.get('/', verifyToken, requireRole(['Manager']), getUsersByRole);
+router.post('/register', verifyToken, requireRole(['Manager']), registerUser);
+router.put('/:id', verifyToken, requireRole(['Manager']), updateUser);
 
 module.exports = router;
